@@ -77,6 +77,7 @@ public class SessionListener implements HttpSessionListener {
     - https://velog.io/@twinsgemini/%EB%8F%99%EC%8B%9C%EC%84%B1-%EC%9D%B4%EC%8A%88-HashMap-vs-ConcurrentHashMap
 
 #### SessionManager 내 메서드
+※ 스케줄러를 사용할 경우 main 클래스에 @EnableScheduling 어노테이션을 추가해야 함
 ```java
 @Component
 public class SessionManager {
@@ -93,7 +94,9 @@ public class SessionManager {
 
     public void removeSession(String sessionId) {
         System.out.println("## call removeSession");
+        //sessions.get(sessionId).invalidate();
         sessions.remove(sessionId);
+
     }
 
     public void removeAttribute(String sessionId){
@@ -122,11 +125,49 @@ public class SessionManager {
         }
         return attributesMap;
     }
+
+    // map에 들어 있는 모든 데이터는 삭제 했지만 서블릿컨테이너에서 관리하는 세션은 삭제하지 않았음
+    // 스케줄러가 돌고 난 뒤에 해당 세션의  ID로 데이터를 찾으려고 하면, map에서만 삭제되어서 찾지 못하는 상황이 발생함
+    // 그래서 invalidate() 도 같이 진행해야 함
+    @Scheduled(fixedRate = 3600000) // 1시간 마다 실행
+    public void cleanupInactiveSessions() {
+        long now = System.currentTimeMillis();
+        sessions.entrySet().removeIf(entry -> {
+            HttpSession session = entry.getValue();
+            boolean isInactive = now - session.getLastAccessedTime() > session.getMaxInactiveInterval() * 1000;
+            if (isInactive) {
+                session.invalidate();
+                System.out.println("Session invalidated: " + session.getId());
+            }
+            return isInactive;
+        });
+        System.out.println("### clear inactive sessions (ConcurrentHashMap)");
+    }
+
+    @Scheduled(fixedRate = 60000)   //60초마다 모든 세션 삭제
+    public void cleanupSessions() {
+        for (HttpSession session : sessions.values()) {
+            session.invalidate();
+        }
+        sessions.clear();
+        System.out.println("All sessions cleared at " + java.time.LocalDateTime.now());
+    }
+
+    @Scheduled(cron = "0 0 5 * * ?")  // 매일 아침 5시에 저장된 모든 세션 삭제
+    public void cleanupAllSessions() {
+        for (HttpSession session : sessions.values()) {
+            session.invalidate();
+        }
+        sessions.clear();
+        System.out.println("All sessions cleared at " + java.time.LocalDateTime.now());
+    }
 }
+
 ```
 ```text
 코드가 길어짐을 방지하기 위해 import , package 부분은 지웠으며, 해당 내용은 직접 코드에 가서 확인
 ```
+
 
 - void addSession(HttpSession session)
   - 세션이 생성 될 때 map 에 사용자의 세션ID를 키로, 세션을 value로 추가함 
@@ -143,6 +184,57 @@ public class SessionManager {
 
 - Map<String, Object> getAllAttributes(String sessionId)
   - session에 저장되어 있는 속성(attribute)들을 전부 꺼내와서 map에 담아 리턴함 
+
+<span style="color:red">※ 아래 세개의 메서드는 주기적으로 map에 저장되어 있는 세션 정보를 삭제함</span> <br>
+<span style="color:red">※ 세션 정보(map) 삭제와 세션(httpsession) 삭제는 엄연히 다르므로 구분해야 함</span> <br>
+<span style="color:red">※ 세션 정보(map) 삭제는 sessions.clear()를 사용 </span> <br>
+<span style="color:red">※ 세션(httpsession) 삭제는 session.invalidate()를 사용</span> <br>
+
+- void cleanupInactiveSessions()
+  - 세션의 최대 비활성 시간을 밀리초 단위로 변환하여 마지막 접근 시간으로부터 경과된 시간이 최대 비활성 시간을 초과한 경우에만 삭제
+  - session.invalidate() , sessions.clear() 두개의 메서드를 호출하여 map에 저장되어 있는 session의 id와 session을 삭제함
+ 
+- void cleanupSessions()
+  - 일정 시간마다 돌면서 session에 저장되어 있는 모든 값을 삭제
+  - session.invalidate() , sessions.clear() 두개의 메서드를 호출하여 map에 저장되어 있는 session의 id와 session을 삭제함
+
+- void cleanupAllSessions()
+  - 정해진 시간마다 돌면서 session에 저장되어 있는 모든 값을 삭제
+  - session.invalidate() , sessions.clear() 두개의 메서드를 호출하여 map에 저장되어 있는 session의 id와 session을 삭제함
+
+#### removeSession 과 removeAttribute 의 차이
+- removeSession : map에 저장되어 있는 세션을 삭제함
+```text
+removeSession는 session 자체를 삭제하는 것이 아닌 map에 담겨 있는 session 정보를 삭제함
+사용자의 세션이 살아있는(유효한) 상태에서는 서블릿 컨테이너에서 HttpSessionListener클래스의 sessionCreated 메서드를 다시 호출하지 않으므로
+removeSession 를 사용해서 사용자의 세션을 map에서 지워버렸을 경우 다시 직접 사용자의 세션을 다시 추가 해줘야함
+```
+- removeAttribute : 해당 session에 저장되어 있는 속성들을 삭제함
+```text
+removeAttribute 는 map 저장된 세션은 그대로 두면서 해당 세션에 저장되어 있는 데이터(attribute)만을 제거함
+사용자가 다시 한번 해당 세션에 데이터를 추가해야 할 상황이 발생할 경우 map에서 지워버리면 더이상 해당 세션을 찾을 방법이 없어짐
+그래서 단순히 세션에 저장된 데이터만을 제거하도록 함
+```
+- removeSession 을 사용했을 경우
+```text
+1. 사용자가 접속
+2. 사용자의 정보를 session에 추가
+3. 타 서비스(was)에서 해당 사용자의 session id를 사용하여 세션에 저장되어 있는 정보를 가져간 뒤 removeSession 을 호출하여 해당 세션을 Map에서 삭제
+4. 사용자가 다시 해당 페이지에 접속
+5. Spring servlet container 에서는 이미 사용자의 세션이 생성되어 있으므로 sessionCreated() 메서드를 호출하지 않음
+※ sessionCreated() 메서드가 호출되지 않으면 세션의 정보를 저장하는 map에도 세션 정보가 다시 저장되지 않음
+6. 타 서비스에서 해당 사용자의 session id로 호출 시 map에는 데이터가 없기때문에 Session not found 리턴
+```
+- removeAttribute 을 사용했을 경우
+```text
+1. 사용자가 접속
+2. 사용자의 정보를 session에 추가
+3. 타 서비스(was)에서 해당 사용자의 session id를 사용하여 세션에 저장되어 있는 정보를 가져간 뒤 removeAttribute 을 호출하여 해당 세션에 저장되어 있는 데이터(attribute)를 삭제
+4. 사용자가 다시 해당 페이지에 접속
+5. sessionManager 클래스에서 관리하는 map에는 해당 사용자의 session id가 존재하므로, session 정보를 가져와서 데이터 추가
+6. 타 서비스에서 해당 사용자의 session id로 호출 시 저장된 데이터 return
+```
+
 
 ### MainController 클래스
 - SessionManager 클래스를 직접 사용하는 예시를 작성한 클래스
@@ -191,35 +283,3 @@ public class MainController {
   - 입력받은 session id로 session 을 찾아 해당 session에 저장된 데이터(attribute)를 리턴하도록 구현하였음
   - sessionManager.removeSession 를 사용하지 않고 sessionManager.removeAttribute를 사용해야 함
 
-#### removeSession 과 removeAttribute 의 차이
-- removeSession : map에 저장되어 있는 세션을 삭제함
-```text
-removeSession는 session 자체를 삭제하는 것이 아닌 map에 담겨 있는 session 정보를 삭제함
-사용자의 세션이 살아있는(유효한) 상태에서는 서블릿 컨테이너에서 HttpSessionListener클래스의 sessionCreated 메서드를 다시 호출하지 않으므로
-removeSession 를 사용해서 사용자의 세션을 map에서 지워버렸을 경우 다시 직접 사용자의 세션을 다시 추가 해줘야함
-```
-- removeAttribute : 해당 session에 저장되어 있는 속성들을 삭제함
-```text
-removeAttribute 는 map 저장된 세션은 그대로 두면서 해당 세션에 저장되어 있는 데이터(attribute)만을 제거함
-사용자가 다시 한번 해당 세션에 데이터를 추가해야 할 상황이 발생할 경우 map에서 지워버리면 더이상 해당 세션을 찾을 방법이 없어짐
-그래서 단순히 세션에 저장된 데이터만을 제거하도록 함
-```
-- removeSession 을 사용했을 경우
-```text
-1. 사용자가 접속
-2. 사용자의 정보를 session에 추가
-3. 타 서비스(was)에서 해당 사용자의 session id를 사용하여 세션에 저장되어 있는 정보를 가져간 뒤 removeSession 을 호출하여 해당 세션을 Map에서 삭제
-4. 사용자가 다시 해당 페이지에 접속
-5. Spring servlet container 에서는 이미 사용자의 세션이 생성되어 있으므로 sessionCreated() 메서드를 호출하지 않음
-※ sessionCreated() 메서드가 호출되지 않으면 세션의 정보를 저장하는 map에도 세션 정보가 다시 저장되지 않음
-6. 타 서비스에서 해당 사용자의 session id로 호출 시 map에는 데이터가 없기때문에 Session not found 리턴
-```
-- removeAttribute 을 사용했을 경우
-```text
-1. 사용자가 접속
-2. 사용자의 정보를 session에 추가
-3. 타 서비스(was)에서 해당 사용자의 session id를 사용하여 세션에 저장되어 있는 정보를 가져간 뒤 removeAttribute 을 호출하여 해당 세션에 저장되어 있는 데이터(attribute)를 삭제
-4. 사용자가 다시 해당 페이지에 접속
-5. sessionManager 클래스에서 관리하는 map에는 해당 사용자의 session id가 존재하므로, session 정보를 가져와서 데이터 추가
-6. 타 서비스에서 해당 사용자의 session id로 호출 시 저장된 데이터 return
-```
