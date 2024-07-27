@@ -185,10 +185,10 @@ public class SessionManager {
 - Map<String, Object> getAllAttributes(String sessionId)
   - session에 저장되어 있는 속성(attribute)들을 전부 꺼내와서 map에 담아 리턴함 
 
-<span style="color:red">※ 아래 세개의 메서드는 주기적으로 map에 저장되어 있는 세션 정보를 삭제함</span> <br>
-<span style="color:red">※ 세션 정보(map) 삭제와 세션(httpsession) 삭제는 엄연히 다르므로 구분해야 함</span> <br>
-<span style="color:red">※ 세션 정보(map) 삭제는 sessions.clear()를 사용 </span> <br>
-<span style="color:red">※ 세션(httpsession) 삭제는 session.invalidate()를 사용</span> <br>
+<b><span style="color:red">※ 아래 세개의 메서드는 주기적으로 map에 저장되어 있는 세션 정보를 삭제함</span></b><br>
+<b><span style="color:red">※ 세션 정보(map) 삭제와 세션(httpsession) 삭제는 엄연히 다르므로 구분해야 함</span></b><br>
+<b><span style="color:red">※ 세션 정보(map) 삭제는 sessions.clear()를 사용 </span></b><br>
+<b><span style="color:red">※ 세션(httpsession) 삭제는 session.invalidate()를 사용</span></b><br>
 
 - void cleanupInactiveSessions()
   - 세션의 최대 비활성 시간을 밀리초 단위로 변환하여 마지막 접근 시간으로부터 경과된 시간이 최대 비활성 시간을 초과한 경우에만 삭제
