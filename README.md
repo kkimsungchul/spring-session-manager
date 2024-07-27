@@ -106,7 +106,7 @@ public class SessionManager {
             }
         }
     }
-    
+
     public Map<String, Object> getAllAttributes(String sessionId){
         HttpSession session = getSession(sessionId);
         Map<String, Object> attributesMap = new HashMap<>();
@@ -116,11 +116,12 @@ public class SessionManager {
                 String attributeName = attributeNames.nextElement();
                 attributesMap.put(attributeName, session.getAttribute(attributeName));
             }
+            attributesMap.put("message","Session found");
         }else{
-            attributesMap.put("error", "Session not found");
+            attributesMap.put("message", "Session not found");
         }
         return attributesMap;
-    }    
+    }
 }
 ```
 ```text
